@@ -1,0 +1,121 @@
+Add-Type -AssemblyName System.Windows.Forms
+
+# Create the form
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "Move Files"
+$form.Size = New-Object System.Drawing.Size(400, 400)
+$form.StartPosition = "CenterScreen"
+
+# Create a list box to display and edit source folders
+$listBox = New-Object System.Windows.Forms.ListBox
+$listBox.Location = New-Object System.Drawing.Point(20, 20)
+$listBox.Size = New-Object System.Drawing.Size(340, 150)
+$form.Controls.Add($listBox)
+
+# Create a button to add a new source folder
+$addButton = New-Object System.Windows.Forms.Button
+$addButton.Location = New-Object System.Drawing.Point(20, 180)
+$addButton.Size = New-Object System.Drawing.Size(100, 23)
+$addButton.Text = "Add Source"
+$form.Controls.Add($addButton)
+
+# Create a button to remove a selected source folder
+$removeButton = New-Object System.Windows.Forms.Button
+$removeButton.Location = New-Object System.Drawing.Point(140, 180)
+$removeButton.Size = New-Object System.Drawing.Size(100, 23)
+$removeButton.Text = "Remove"
+$form.Controls.Add($removeButton)
+
+# Create a button to set the target folder and move files
+$moveButton = New-Object System.Windows.Forms.Button
+$moveButton.Location = New-Object System.Drawing.Point(260, 180)
+$moveButton.Size = New-Object System.Drawing.Size(100, 23)
+$moveButton.Text = "Move Files"
+$form.Controls.Add($moveButton)
+
+# Create a progress bar
+$progressBar = New-Object System.Windows.Forms.ProgressBar
+$progressBar.Location = New-Object System.Drawing.Point(20, 220)
+$progressBar.Size = New-Object System.Drawing.Size(340, 23)
+$form.Controls.Add($progressBar)
+
+# Dictionary to store source and destination folders
+$folderMapping = @{}
+
+# Event handler to add a new source folder
+$addButton.Add_Click({
+    $folderBrowser = New-Object System.Windows.Forms.FolderBrowserDialog
+    if ($folderBrowser.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $sourcePath = $folderBrowser.SelectedPath
+        if (-not $folderMapping.ContainsKey($sourcePath)) {
+            $folderMapping[$sourcePath] = ""
+            $listBox.Items.Add($sourcePath)
+        }
+    }
+})
+
+# Event handler to remove a selected source folder
+$removeButton.Add_Click({
+    if ($listBox.SelectedIndex -ge 0) {
+        $selectedPath = $listBox.SelectedItem
+        $folderMapping.Remove($selectedPath)
+        $listBox.Items.RemoveAt($listBox.SelectedIndex)
+    }
+})
+
+# Event handler to set the target folder and move files and folders
+$moveButton.Add_Click({
+    $progressBar.Value = 0
+    $totalItems = 0
+    $movedItems = 0
+
+    # Calculate total items (files and folders) to move
+    foreach ($sourcePath in $listBox.Items) {
+        $totalItems += (Get-ChildItem -Path $sourcePath -File -Recurse).Count
+        $totalItems += (Get-ChildItem -Path $sourcePath -Directory -Recurse).Count
+    }
+
+    if ($totalItems -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show("No files or folders found to move.")
+        return
+    }
+
+    foreach ($sourcePath in $listBox.Items) {
+        $folderBrowser = New-Object System.Windows.Forms.FolderBrowserDialog
+        $folderBrowser.Description = "Select target folder for " + $sourcePath
+        if ($folderBrowser.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $destinationPath = $folderBrowser.SelectedPath
+            $folderMapping[$sourcePath] = $destinationPath
+
+            # Create the destination folder if it doesn't exist
+            if (-not (Test-Path -Path $destinationPath)) {
+                New-Item -ItemType Directory -Path $destinationPath
+            }
+
+            # Move the files and folders
+            $items = Get-ChildItem -Path $sourcePath -Recurse
+            foreach ($item in $items) {
+                try {
+                    $destItemPath = Join-Path -Path $destinationPath -ChildPath $item.FullName.Substring($sourcePath.Length)
+                    if ($item.PSIsContainer) {
+                        if (-not (Test-Path -Path $destItemPath)) {
+                            New-Item -ItemType Directory -Path $destItemPath
+                        }
+                    } else {
+                        Move-Item -Path $item.FullName -Destination $destItemPath -Force
+                    }
+                    $movedItems++
+                    $progressBar.Value = [math]::Round(($movedItems / $totalItems) * 100)
+                } catch {
+                    Write-Host "Error moving item: $($_.Exception.Message)"
+                }
+            }
+        }
+    }
+
+    [System.Windows.Forms.MessageBox]::Show("Files and folders moved successfully.")
+})
+
+# Show the form
+$form.Add_Shown({$form.Activate()})
+[void]$form.ShowDialog()
